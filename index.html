@@ -1,0 +1,1867 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>¡Conoce Venezuela! - Mapa Interactivo de Estados y Capitales</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Fredoka & Nunito para un estilo amigable y didáctico -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <!-- D3.js y TopoJSON Client para cartografía oficial de Venezuela -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+    <!-- Canvas Confetti para celebraciones -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Nunito', 'sans-serif'],
+                        display: ['Fredoka', 'sans-serif'],
+                    },
+                    colors: {
+                        vzla: {
+                            yellow: '#FFD166',
+                            blue: '#118AB2',
+                            red: '#EF476F',
+                            mint: '#06D6A0',
+                            bg: '#F4F8FB',
+                            card: '#FFFFFF',
+                            dark: '#1E293B'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #F0F6FC;
+            background-image: radial-gradient(#CBD5E1 1px, transparent 1px);
+            background-size: 24px 24px;
+            color: #1E293B;
+            overflow-x: hidden;
+        }
+
+        /* Estilos del Mapa SVG */
+        #map-viewport {
+            width: 100%;
+            overflow: hidden;
+            border-radius: 1.25rem;
+            background: linear-gradient(180deg, #E0F2FE 0%, #F0F9FF 45%, #F8FAFC 100%);
+            border: 1.5px solid #BAE6FD;
+            position: relative;
+            touch-action: none;
+        }
+
+        #venezuela-map {
+            width: 100%;
+            height: auto;
+            max-height: 66vh;
+            display: block;
+            transform-origin: center center;
+            transition: transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+            user-select: none;
+        }
+
+        .state-path {
+            stroke: #1E293B;
+            stroke-width: 0.95;
+            stroke-linejoin: round;
+            stroke-linecap: round;
+            transition: fill 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.2s ease, opacity 0.3s ease;
+            cursor: pointer;
+        }
+
+        .state-path:hover {
+            filter: brightness(1.04) drop-shadow(0 3px 6px rgba(15, 23, 42, 0.24));
+            stroke: #0F172A;
+            stroke-width: 1.9;
+        }
+
+        .esequibo-path {
+            stroke: #1E293B;
+            stroke-width: 0.95;
+            stroke-linejoin: round;
+            cursor: pointer;
+            transition: filter 0.2s ease;
+        }
+
+        .esequibo-path:hover {
+            filter: brightness(0.95);
+        }
+
+        /* Estado seleccionado o destacado en Quiz */
+        .state-highlighted {
+            animation: pulseHighlight 1.4s infinite ease-in-out;
+            stroke: #0F172A !important;
+            stroke-width: 2.2 !important;
+        }
+
+        @keyframes pulseHighlight {
+            0%, 100% { fill: #FFD166; filter: drop-shadow(0 0 8px rgba(255, 209, 102, 0.85)); }
+            50% { fill: #FCA311; filter: drop-shadow(0 0 14px rgba(252, 163, 17, 0.95)); }
+        }
+
+        /* Animación al acertar un estado */
+        @keyframes popCelebrate {
+            0% { transform: scale(1); }
+            40% { transform: scale(1.02); }
+            100% { transform: scale(1); }
+        }
+
+        .state-just-learned {
+            animation: popCelebrate 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        /* Animación de sacudida suave al fallar */
+        @keyframes gentleShake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-6px); }
+            50% { transform: translateX(6px); }
+            75% { transform: translateX(-4px); }
+        }
+
+        .shake-error {
+            animation: gentleShake 0.4s ease-in-out;
+        }
+
+        /* Botones estilo Duolingo 3D suave */
+        .btn-3d {
+            transition: all 0.15s ease;
+            box-shadow: 0 4px 0 rgba(0, 0, 0, 0.15);
+        }
+        .btn-3d:active {
+            transform: translateY(3px);
+            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+        }
+
+        /* Scrollbar personalizada */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #E2E8F0;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #94A3B8;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748B;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Tooltip Flotante para el Mapa -->
+    <div id="map-tooltip" class="fixed pointer-events-none z-50 hidden bg-slate-800/95 text-white px-3.5 py-2 rounded-2xl shadow-xl text-sm font-bold tracking-wide backdrop-blur-sm border border-slate-700 transition-opacity duration-150">
+        <div id="tooltip-name" class="text-amber-300 font-display text-base">Estado</div>
+        <div id="tooltip-sub" class="text-xs text-slate-300 font-normal">Capital</div>
+    </div>
+
+    <!-- Barra Superior (Header y Gamificación) -->
+    <header class="bg-white/90 backdrop-blur-md border-b-2 border-sky-100 sticky top-0 z-30 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <!-- Logo y Título -->
+            <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-400 via-blue-500 to-rose-500 p-0.5 shadow-md flex items-center justify-center">
+                    <div class="w-full h-full bg-white rounded-[14px] flex items-center justify-center text-2xl">
+                        🇻🇪
+                    </div>
+                </div>
+                <div>
+                    <h1 class="font-display text-xl sm:text-2xl font-bold text-slate-800 leading-tight">
+                        ¡Conoce <span class="text-sky-600">Venezuela</span>!
+                    </h1>
+                    <p class="text-xs text-slate-500 font-semibold hidden sm:block">Aprende los 23 estados y el Distrito Capital jugando</p>
+                </div>
+            </div>
+
+            <!-- Barra de Progreso Central -->
+            <div class="flex-1 max-w-md mx-2 order-3 md:order-2 w-full md:w-auto">
+                <div class="flex justify-between items-center text-xs font-extrabold mb-1">
+                    <span class="text-slate-600 flex items-center gap-1">
+                        🗺️ Progreso del Mapa
+                    </span>
+                    <span id="progress-text" class="text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                        0 / 24 Aprendidos
+                    </span>
+                </div>
+                <div class="w-full h-3.5 bg-slate-200 rounded-full overflow-hidden p-0.5 shadow-inner">
+                    <div id="progress-bar" class="h-full bg-gradient-to-r from-emerald-400 to-teal-500 rounded-full transition-all duration-500 ease-out" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Estadísticas y Controles -->
+            <div class="flex items-center gap-2 sm:gap-3 order-2 md:order-3">
+                <!-- Puntos -->
+                <div class="flex items-center gap-1.5 bg-amber-50 border-2 border-amber-200 px-3 py-1.5 rounded-2xl shadow-sm" title="Puntos acumulados">
+                    <span class="text-lg">⭐</span>
+                    <span id="score-display" class="font-display font-bold text-amber-700 text-base">0</span>
+                </div>
+                <!-- Racha -->
+                <div class="flex items-center gap-1.5 bg-orange-50 border-2 border-orange-200 px-3 py-1.5 rounded-2xl shadow-sm" title="Racha de aciertos seguidos">
+                    <span class="text-lg">🔥</span>
+                    <span id="streak-display" class="font-display font-bold text-orange-600 text-base">0</span>
+                </div>
+                <!-- Botón de Sonido -->
+                <button id="btn-sound" onclick="toggleSound()" class="p-2.5 rounded-2xl bg-sky-50 hover:bg-sky-100 text-sky-600 border-2 border-sky-200 transition" title="Activar/Silenciar sonidos">
+                    <span id="sound-icon" class="text-lg">🔊</span>
+                </button>
+                <!-- Botón Reiniciar -->
+                <button onclick="confirmReset()" class="p-2.5 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-600 border-2 border-rose-200 transition" title="Reiniciar progreso">
+                    <span class="text-lg">🔄</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Selector de Modos de Juego y Filtro de Regiones -->
+    <div class="max-w-7xl mx-auto w-full px-4 pt-4 pb-2 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+        <!-- Pestañas de Modos -->
+        <div class="grid grid-cols-3 gap-2 bg-white p-1.5 rounded-3xl shadow-sm border-2 border-slate-100">
+            <button onclick="setMode('explore')" id="tab-explore" class="mode-tab btn-3d py-2.5 px-3 sm:px-5 rounded-2xl font-display font-semibold text-sm sm:text-base flex items-center justify-center gap-2 bg-sky-500 text-white">
+                <span>🧭</span> <span>Explorar</span>
+            </button>
+            <button onclick="setMode('find')" id="tab-find" class="mode-tab py-2.5 px-3 sm:px-5 rounded-2xl font-display font-semibold text-sm sm:text-base flex items-center justify-center gap-2 text-slate-600 hover:bg-slate-100 transition">
+                <span>🎯</span> <span>Ubicar Estado</span>
+            </button>
+            <button onclick="setMode('capitals')" id="tab-capitals" class="mode-tab py-2.5 px-3 sm:px-5 rounded-2xl font-display font-semibold text-sm sm:text-base flex items-center justify-center gap-2 text-slate-600 hover:bg-slate-100 transition">
+                <span>🏛️</span> <span>Capitales</span>
+            </button>
+        </div>
+
+        <!-- Filtro por Región -->
+        <div class="flex items-center gap-2 bg-white px-3.5 py-2 rounded-3xl shadow-sm border-2 border-slate-100">
+            <label for="region-filter" class="text-xs font-extrabold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                🌎 Región:
+            </label>
+            <select id="region-filter" onchange="filterByRegion(this.value)" class="w-full sm:w-auto bg-slate-50 border border-slate-200 text-slate-700 font-bold text-sm rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer">
+                <option value="all">Todas las regiones (24)</option>
+                <option value="Andina">🏔️ Región Andina (3)</option>
+                <option value="Capital">🏙️ Región Capital (3)</option>
+                <option value="Central">🏭 Región Central (3)</option>
+                <option value="Centro-Occidental">🌵 Centro-Occidental (4)</option>
+                <option value="Guayana">🏞️ Región Guayana (3)</option>
+                <option value="Insular">🏝️ Región Insular (1)</option>
+                <option value="Los Llanos">🐎 Los Llanos (2)</option>
+                <option value="Nororiental">🏖️ Región Nororiental (3)</option>
+                <option value="Zuliana">🌉 Región Zuliana (1)</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Contenedor Principal (Mapa + Panel Didáctico) -->
+    <main class="max-w-7xl mx-auto w-full px-4 py-3 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        
+        <!-- Columna Izquierda/Central: Mapa Interactivo de Venezuela (7 columnas en desktop) -->
+        <div class="lg:col-span-7 bg-white rounded-3xl p-4 sm:p-5 shadow-md border-2 border-sky-100 flex flex-col items-center relative overflow-hidden">
+            <!-- Encabezado sutil del mapa -->
+            <div class="w-full flex flex-wrap items-center justify-between gap-2 mb-2.5 z-10">
+                <span id="map-instruction-badge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-sky-100 text-sky-700">
+                    👆 Haz clic en cualquier estado para descubrirlo
+                </span>
+                <div class="flex items-center gap-3 text-xs font-bold text-slate-500">
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-slate-200 border border-slate-300 inline-block"></span> Por aprender</span>
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-emerald-400 inline-block"></span> Aprendido</span>
+                </div>
+            </div>
+
+            <!-- Contenedor del Mapa SVG con Zoom y Pan -->
+            <div id="map-viewport" class="w-full flex items-center justify-center my-auto relative">
+                <!-- Indicador de cartografía oficial -->
+                <div id="map-source-badge" class="absolute top-2.5 left-2.5 z-20 pointer-events-none flex items-center gap-1.5 text-sky-900/85 font-display text-[11px] bg-white/85 backdrop-blur-xs px-2.5 py-1 rounded-xl border border-sky-200/80 shadow-xs">
+                    <span>🧭</span>
+                    <span id="map-source-text">Cargando mapa oficial...</span>
+                </div>
+
+                <!-- Controles de Zoom para estados pequeños -->
+                <div class="absolute bottom-2.5 right-2.5 z-20 flex items-center gap-1 bg-white/95 backdrop-blur-sm p-1 rounded-2xl shadow-md border border-sky-200">
+                    <button onclick="zoomMap(0.35)" class="w-8 h-8 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 font-extrabold text-base flex items-center justify-center transition" title="Acercar (ideal para estados pequeños)">
+                        +
+                    </button>
+                    <button onclick="zoomMap(-0.35)" class="w-8 h-8 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 font-extrabold text-base flex items-center justify-center transition" title="Alejar">
+                        −
+                    </button>
+                    <button onclick="zoomCenterNorth()" class="px-2.5 h-8 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs flex items-center justify-center gap-1 transition" title="Enfocar región centro-norte (Caracas, La Guaira, Aragua, Carabobo, Yaracuy)">
+                        🔍 Centro
+                    </button>
+                    <button onclick="resetMapZoom()" class="px-2.5 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center transition" title="Ver mapa completo">
+                        100%
+                    </button>
+                </div>
+
+                <!-- SVG Cartográfico de Venezuela (Proyección Mercator oficial + respaldo vectorial) -->
+                <svg id="venezuela-map" viewBox="0 0 960 720" xmlns="http://www.w3.org/2000/svg" aria-label="Mapa político-territorial interactivo de Venezuela">
+                    <defs>
+                        <!-- Patrón rayado diagonal rojo oficial para la Guayana Esequiba (Zona en Reclamación) -->
+                        <pattern id="esequiboPattern" width="16" height="16" patternTransform="rotate(-40 0 0)" patternUnits="userSpaceOnUse">
+                            <rect width="16" height="16" fill="#F8FAFC" />
+                            <line x1="0" y1="0" x2="0" y2="16" stroke="#DC2626" stroke-width="5" stroke-dasharray="11 5" />
+                        </pattern>
+                        <filter id="mapDropShadow" x="-4%" y="-4%" width="108%" height="108%">
+                            <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#0F172A" flood-opacity="0.08"/>
+                        </filter>
+                    </defs>
+
+                    <!-- Fondo marítimo azul cielo suave -->
+                    <rect x="0" y="0" width="960" height="720" fill="#9BD7EC" />
+
+                    <g id="map-transform-group" filter="url(#mapDropShadow)">
+                        <!-- Países vecinos y Antillas (proyectados a escala con D3 o respaldo) -->
+                        <g id="neighbor-lands" fill="#EDE4D3" stroke="#334155" stroke-width="0.75" pointer-events="none"></g>
+
+                        <!-- Dependencias Federales Venezolanas (Los Roques, Las Aves, La Orchila, La Tortuga, etc.) -->
+                        <g id="federal-dependencies" fill="#F59E0B" stroke="#1E293B" stroke-width="0.7" pointer-events="none"></g>
+
+                        <!-- GUAYANA ESEQUIBA / ZONA EN RECLAMACIÓN -->
+                        <g id="esequibo-group" onclick="selectEsequibo()">
+                            <path id="state-esequibo" class="esequibo-path" fill="url(#esequiboPattern)" />
+                        </g>
+
+                        <!-- CAPA DE LOS 23 ESTADOS + DISTRITO CAPITAL -->
+                        <g id="states-layer"></g>
+
+                        <!-- Detalles hidrográficos de respaldo -->
+                        <g id="hydrography-layer" pointer-events="none"></g>
+
+                        <!-- Etiquetas geográficas de contexto (Mar Caribe, Océano Atlántico, Países vecinos) -->
+                        <g id="geo-context-labels" pointer-events="none"></g>
+
+                        <!-- Capa de Etiquetas y Líneas Guía (Callouts) en los estados aprendidos -->
+                        <g id="labels-layer" pointer-events="none"></g>
+                    </g>
+                </svg>
+            </div>
+        </div>
+
+        <!-- Columna Derecha: Panel Interactivo Didáctico (5 columnas en desktop) -->
+        <div class="lg:col-span-5 flex flex-col gap-4">
+            
+            <!-- VISTA 1: MODO EXPLORAR -->
+            <div id="panel-explore" class="flex flex-col gap-4">
+                <!-- Tarjeta Detallada del Estado Seleccionado -->
+                <div id="state-detail-card" class="bg-white rounded-3xl p-5 sm:p-6 shadow-md border-2 border-sky-100 transition-all">
+                    <div class="flex items-start justify-between gap-3 mb-3">
+                        <div>
+                            <span id="card-region-badge" class="inline-block px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-amber-100 text-amber-800 mb-1.5">
+                                Región
+                            </span>
+                            <h2 id="card-state-name" class="font-display text-2xl sm:text-3xl font-bold text-slate-800">
+                                Selecciona un estado
+                            </h2>
+                        </div>
+                        <div id="card-emoji" class="w-14 h-14 rounded-2xl bg-sky-50 border-2 border-sky-100 flex items-center justify-center text-3xl shadow-sm shrink-0">
+                            🗺️
+                        </div>
+                    </div>
+
+                    <div id="card-content-body">
+                        <p class="text-slate-600 text-sm sm:text-base leading-relaxed mb-4">
+                            Haz clic sobre cualquier estado en el mapa de la izquierda o elige uno de la lista inferior para conocer su <strong>capital</strong>, su <strong>ubicación</strong> y un <strong>dato curioso</strong>.
+                        </p>
+                        <div class="bg-sky-50/80 border border-sky-200 rounded-2xl p-3.5 text-xs sm:text-sm text-sky-800 font-semibold flex items-center gap-2.5">
+                            <span class="text-xl">💡</span>
+                            <span>Tip: Cuando te sientas listo, cambia arriba a <strong>"Ubicar Estado"</strong> o <strong>"Capitales"</strong> para poner a prueba tu memoria.</span>
+                        </div>
+                    </div>
+
+                    <!-- Contenedor oculto que se muestra al seleccionar un estado -->
+                    <div id="card-state-info" class="hidden space-y-3.5">
+                        <div id="card-capital-box" class="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
+                            <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center text-xl shrink-0">
+                                🏛️
+                            </div>
+                            <div>
+                                <div class="text-xs font-bold text-slate-400 uppercase">Capital</div>
+                                <div id="card-capital-name" class="font-display font-bold text-lg text-slate-800">Caracas</div>
+                            </div>
+                        </div>
+
+                        <div class="bg-emerald-50/70 border border-emerald-200/80 p-3.5 rounded-2xl">
+                            <div class="text-xs font-extrabold text-emerald-700 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                <span>✨</span> ¿Sabías que...?
+                            </div>
+                            <p id="card-fun-fact" class="text-sm text-slate-700 leading-relaxed font-medium">
+                                Dato curioso del estado.
+                            </p>
+                        </div>
+
+                        <button id="btn-mark-learned" onclick="toggleCurrentStateLearned()" class="btn-3d w-full py-3 px-4 rounded-2xl font-display font-bold text-base flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white">
+                            <span>✅</span> <span id="btn-mark-text">Marcar como aprendido (+10 pts)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Lista / Cuadrícula Rápida de Estados -->
+                <div class="bg-white rounded-3xl p-4 sm:p-5 shadow-md border-2 border-sky-100">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="font-display font-bold text-base text-slate-700 flex items-center gap-1.5">
+                            <span>📋</span> Lista de Entidades (<span id="list-count">24</span>)
+                        </h3>
+                        <span class="text-xs font-bold text-slate-400">Clic para ver</span>
+                    </div>
+                    <div id="states-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1">
+                        <!-- Se llena dinámicamente con JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- VISTA 2: MODO QUIZ (UBICAR EN EL MAPA) -->
+            <div id="panel-find" class="hidden flex-col gap-4">
+                <div id="quiz-find-card" class="bg-white rounded-3xl p-6 shadow-md border-2 border-amber-200">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="px-3 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800 uppercase tracking-wider">
+                            🎯 Misión de Ubicación
+                        </span>
+                        <span id="find-remaining" class="text-xs font-bold text-slate-500">
+                            Faltan 24
+                        </span>
+                    </div>
+
+                    <p class="text-slate-500 font-bold text-sm mb-1">Haz clic en el mapa sobre:</p>
+                    <h2 id="find-target-name" class="font-display text-3xl sm:text-4xl font-bold text-sky-600 mb-4">
+                        Mérida
+                    </h2>
+
+                    <!-- Pista opcional -->
+                    <div id="find-hint-box" class="hidden bg-amber-50 border border-amber-200 rounded-2xl p-3.5 mb-4 text-sm text-amber-900">
+                        <strong class="font-extrabold">💡 Pista:</strong> <span id="find-hint-text"></span>
+                    </div>
+
+                    <!-- Mensaje de retroalimentación -->
+                    <div id="find-feedback" class="hidden rounded-2xl p-3.5 mb-4 text-sm font-bold flex items-center gap-2.5">
+                    </div>
+
+                    <div class="flex flex-wrap gap-2.5">
+                        <button onclick="showFindHint()" class="btn-3d flex-1 py-2.5 px-4 rounded-2xl bg-amber-100 hover:bg-amber-200 text-amber-800 font-display font-semibold text-sm flex items-center justify-center gap-1.5">
+                            <span>💡</span> Pedir Pista
+                        </button>
+                        <button onclick="nextFindQuestion(true)" class="btn-3d flex-1 py-2.5 px-4 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-display font-semibold text-sm flex items-center justify-center gap-1.5">
+                            <span>⏭️</span> Saltar
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Mini tarjeta educativa tras acertar -->
+                <div id="find-learned-preview" class="hidden bg-emerald-50 rounded-3xl p-5 border-2 border-emerald-200 shadow-sm">
+                    <div class="flex items-center gap-2 text-emerald-700 font-display font-bold text-lg mb-1">
+                        <span>🎉</span> <span id="preview-title">¡Excelente!</span>
+                    </div>
+                    <p id="preview-desc" class="text-sm text-emerald-900 leading-relaxed"></p>
+                </div>
+            </div>
+
+            <!-- VISTA 3: MODO CAPITALES -->
+            <div id="panel-capitals" class="hidden flex-col gap-4">
+                <div id="quiz-capitals-card" class="bg-white rounded-3xl p-6 shadow-md border-2 border-purple-200">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="px-3 py-1 rounded-full text-xs font-extrabold bg-purple-100 text-purple-800 uppercase tracking-wider">
+                            🏛️ Desafío de Capitales
+                        </span>
+                        <span class="text-xs font-bold text-slate-400">Observa el estado iluminado</span>
+                    </div>
+
+                    <p class="text-slate-500 font-bold text-sm mb-1">¿Cuál es la capital del estado:</p>
+                    <h2 id="capital-target-state" class="font-display text-3xl font-bold text-purple-600 mb-5">
+                        Carabobo
+                    </h2>
+
+                    <!-- 4 Opciones de Capitales -->
+                    <div id="capital-options" class="grid grid-cols-1 gap-2.5 mb-4">
+                        <!-- Botones generados dinámicamente -->
+                    </div>
+
+                    <!-- Feedback de Capitales -->
+                    <div id="capital-feedback" class="hidden rounded-2xl p-3.5 text-sm font-bold flex items-center gap-2">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Modal de Celebración Final (Cuando completa los 24) -->
+    <div id="victory-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 text-center shadow-2xl border-4 border-amber-300 transform transition-all">
+            <div class="w-20 h-20 mx-auto bg-amber-100 rounded-full flex items-center justify-center text-5xl mb-4 shadow-inner">
+                🏆
+            </div>
+            <h2 class="font-display text-3xl font-bold text-slate-800 mb-2">
+                ¡Felicitaciones!
+            </h2>
+            <p class="text-slate-600 font-medium mb-5">
+                ¡Has completado todo el mapa de Venezuela! Ahora conoces los <strong>23 estados y el Distrito Capital</strong> con sus respectivas capitales.
+            </p>
+            <div class="bg-sky-50 rounded-2xl p-4 mb-6 flex justify-around border border-sky-100">
+                <div>
+                    <div class="text-xs font-bold text-slate-400 uppercase">Puntaje Final</div>
+                    <div id="final-score" class="font-display text-2xl font-bold text-amber-500">0 ⭐</div>
+                </div>
+                <div class="w-px bg-sky-200"></div>
+                <div>
+                    <div class="text-xs font-bold text-slate-400 uppercase">Completado</div>
+                    <div class="font-display text-2xl font-bold text-emerald-500">24 / 24 🇻🇪</div>
+                </div>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-3">
+                <button onclick="closeVictoryModal()" class="btn-3d flex-1 py-3 px-4 rounded-2xl bg-sky-500 hover:bg-sky-600 text-white font-display font-bold">
+                    Seguir Explorando
+                </button>
+                <button onclick="resetProgress(true)" class="btn-3d flex-1 py-3 px-4 rounded-2xl bg-amber-400 hover:bg-amber-500 text-slate-900 font-display font-bold">
+                    Jugar de Nuevo
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Confirmación de Reinicio (Sin usar alert/confirm nativo) -->
+    <div id="reset-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-sm w-full p-6 text-center shadow-xl border-2 border-slate-100">
+            <div class="text-4xl mb-3">🔄</div>
+            <h3 class="font-display text-xl font-bold text-slate-800 mb-2">¿Reiniciar el mapa?</h3>
+            <p class="text-sm text-slate-500 mb-5">Se borrarán los estados marcados como aprendidos y volverás a 0 puntos.</p>
+            <div class="flex gap-3">
+                <button onclick="closeResetModal()" class="btn-3d flex-1 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-display font-bold text-sm">
+                    Cancelar
+                </button>
+                <button onclick="resetProgress(true)" class="btn-3d flex-1 py-2.5 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-display font-bold text-sm">
+                    Sí, reiniciar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. BASE DE DATOS EDUCATIVA DE VENEZUELA
+        // ==========================================
+        const VENEZUELA_STATES = [
+            {
+                id: "amazonas",
+                name: "Amazonas",
+                capital: "Puerto Ayacucho",
+                region: "Guayana",
+                emoji: "🌳",
+                color: "#86EFAC",
+                cx: 462, cy: 525,
+                fact: "Es el segundo estado más grande de Venezuela y alberga gran parte de la selva amazónica, tepuyes milenarios y el nacimiento del río Orinoco."
+            },
+            {
+                id: "anzoategui",
+                name: "Anzoátegui",
+                capital: "Barcelona",
+                region: "Nororiental",
+                emoji: "🏖️",
+                color: "#7DD3FC",
+                cx: 562, cy: 236,
+                fact: "Cuenta con más de 100 km de playas caribeñas, incluyendo el famoso Parque Nacional Mochima que comparte con Sucre."
+            },
+            {
+                id: "apure",
+                name: "Apure",
+                capital: "San Fernando de Apure",
+                region: "Los Llanos",
+                emoji: "🐎",
+                color: "#FDE68A",
+                cx: 312, cy: 356,
+                fact: "Es tierra de llanuras infinitas, ríos caudalosos y folklore llanero; aquí se inspiró la famosa novela 'Doña Bárbara'."
+            },
+            {
+                id: "aragua",
+                name: "Aragua",
+                capital: "Maracay",
+                region: "Central",
+                emoji: "🐆",
+                color: "#FED7AA",
+                cx: 398, cy: 184,
+                calloutOffset: { dx: -16, dy: -56 },
+                fact: "Conocida como la 'Ciudad Jardín', alberga el Parque Nacional Henri Pittier, el primer parque nacional decretado en Venezuela (1937)."
+            },
+            {
+                id: "barinas",
+                name: "Barinas",
+                capital: "Barinas",
+                region: "Los Llanos",
+                emoji: "🌾",
+                color: "#FCA5A5",
+                cx: 224, cy: 286,
+                fact: "Es conocida como la 'Capital de los Llanos' y combina paisajes de sabana con las estribaciones de la cordillera de los Andes."
+            },
+            {
+                id: "bolivar",
+                name: "Bolívar",
+                capital: "Ciudad Bolívar",
+                region: "Guayana",
+                emoji: "🏞️",
+                color: "#FEF08A",
+                cx: 604, cy: 405,
+                fact: "Es el estado más extenso de Venezuela. Allí se encuentra el Parque Nacional Canaima y el Salto Ángel, la cascada más alta del mundo (979 m)."
+            },
+            {
+                id: "carabobo",
+                name: "Carabobo",
+                capital: "Valencia",
+                region: "Central",
+                emoji: "⚔️",
+                color: "#CBD5E1",
+                cx: 355, cy: 176,
+                calloutOffset: { dx: -24, dy: -46 },
+                fact: "En sus tierras se libró la histórica Batalla de Carabobo (24 de junio de 1821), decisiva para la independencia de Venezuela."
+            },
+            {
+                id: "cojedes",
+                name: "Cojedes",
+                capital: "San Carlos",
+                region: "Central",
+                emoji: "🐄",
+                color: "#D6BC9C",
+                cx: 332, cy: 218,
+                fact: "Es un estado fundamentalmente llanero y ganadero ubicado en el corazón geográfico del país, famoso por sus mangos y su hospitalidad."
+            },
+            {
+                id: "deltaamacuro",
+                name: "Delta Amacuro",
+                capital: "Tucupita",
+                region: "Guayana",
+                emoji: "🛶",
+                color: "#FBCFE8",
+                cx: 734, cy: 256,
+                fact: "Aquí desemboca el majestuoso río Orinoco en el océano Atlántico formando un laberinto de caños e islas habitado por el pueblo indígena Warao."
+            },
+            {
+                id: "distritocapital",
+                name: "Distrito Capital",
+                capital: "Caracas",
+                region: "Capital",
+                emoji: "🏙️",
+                color: "#BBF7D0",
+                cx: 416, cy: 164,
+                calloutOffset: { dx: 24, dy: -46 },
+                fact: "Es la sede de los poderes públicos nacionales y cuna del Libertador Simón Bolívar. Está resguardado por el cerro Waraira Repano (El Ávila)."
+            },
+            {
+                id: "falcon",
+                name: "Falcón",
+                capital: "Santa Ana de Coro",
+                region: "Centro-Occidental",
+                emoji: "🏜️",
+                color: "#F0ABFC",
+                cx: 256, cy: 132,
+                fact: "Posee los Médanos de Coro, impresionantes dunas de arena dorada junto al mar, y su capital fue declarada Patrimonio de la Humanidad."
+            },
+            {
+                id: "guarico",
+                name: "Guárico",
+                capital: "San Juan de los Morros",
+                region: "Los Llanos",
+                emoji: "⛰️",
+                color: "#6EE7B7",
+                cx: 438, cy: 258,
+                fact: "Es la puerta de entrada a los Llanos centrales y se distingue por los Morros de San Juan, unas formaciones rocosas únicas en el paisaje."
+            },
+            {
+                id: "laguaira",
+                name: "La Guaira",
+                capital: "La Guaira",
+                region: "Capital",
+                emoji: "⚓",
+                color: "#F9A8D4",
+                cx: 414, cy: 155,
+                calloutOffset: { dx: 0, dy: -32 },
+                fact: "Antes llamado estado Vargas, es la principal puerta marítima y aérea de Venezuela, conectando la costa caribeña directamente con Caracas."
+            },
+            {
+                id: "lara",
+                name: "Lara",
+                capital: "Barquisimeto",
+                region: "Centro-Occidental",
+                emoji: "🎸",
+                color: "#FDBA74",
+                cx: 244, cy: 184,
+                fact: "Conocida como la 'Capital Musical de Venezuela' y la ciudad de los crepúsculos, famosa por su artesanía, el tamunangue y el monumento El Obelisco."
+            },
+            {
+                id: "merida",
+                name: "Mérida",
+                capital: "Mérida",
+                region: "Andina",
+                emoji: "🏔️",
+                color: "#D9F99D",
+                cx: 152, cy: 268,
+                fact: "Aquí se encuentra el Pico Bolívar (el punto más alto del país con 4.978 m) y el teleférico Mukumbarí, el más alto y largo del mundo."
+            },
+            {
+                id: "miranda",
+                name: "Miranda",
+                capital: "Los Teques",
+                region: "Capital",
+                emoji: "🍫",
+                color: "#E0F2FE",
+                cx: 454, cy: 176,
+                fact: "Famoso por producir uno de los mejores cacaos del mundo en la región de Barlovento y por los coloridos Diablos Danzantes de Yare."
+            },
+            {
+                id: "monagas",
+                name: "Monagas",
+                capital: "Maturín",
+                region: "Nororiental",
+                emoji: "🦇",
+                color: "#E2E8F0",
+                cx: 632, cy: 214,
+                fact: "Alberga la Cueva del Guácharo, un monumento natural descubierto para la ciencia por Alexander von Humboldt en 1799."
+            },
+            {
+                id: "nuevaesparta",
+                name: "Nueva Esparta",
+                capital: "La Asunción",
+                region: "Insular",
+                emoji: "🏝️",
+                color: "#C4B5FD",
+                cx: 572, cy: 138,
+                calloutOffset: { dx: 30, dy: -22 },
+                fact: "Es el único estado insular de Venezuela, formado por las islas de Margarita, Coche y Cubagua. Se le conoce como 'La Perla del Caribe'."
+            },
+            {
+                id: "portuguesa",
+                name: "Portuguesa",
+                capital: "Guanare",
+                region: "Centro-Occidental",
+                emoji: "🌻",
+                color: "#99F6E4",
+                cx: 274, cy: 244,
+                fact: "Se le llama el 'Granero de Venezuela' por su enorme producción agrícola y es sede del Santuario Nacional de la Virgen de Coromoto."
+            },
+            {
+                id: "sucre",
+                name: "Sucre",
+                capital: "Cumaná",
+                region: "Nororiental",
+                emoji: "⛵",
+                color: "#FDE047",
+                cx: 618, cy: 162,
+                fact: "Su capital, Cumaná, fue fundada en 1515 y es la ciudad más antigua fundada por europeos en el continente americano."
+            },
+            {
+                id: "tachira",
+                name: "Táchira",
+                capital: "San Cristóbal",
+                region: "Andina",
+                emoji: "☕",
+                color: "#A3E635",
+                cx: 112, cy: 306,
+                fact: "Es un estado andino fronterizo famoso por su clima fresco, sus páramos, su tradición cafetalera y su cordialidad ('La Ciudad de la Cordialidad')."
+            },
+            {
+                id: "trujillo",
+                name: "Trujillo",
+                capital: "Trujillo",
+                region: "Andina",
+                emoji: "🕊️",
+                color: "#FDE68A",
+                cx: 196, cy: 222,
+                fact: "Aquí se encuentra el Monumento a la Virgen de la Paz, la escultura habitable más alta de América con 46,7 metros de altura."
+            },
+            {
+                id: "yaracuy",
+                name: "Yaracuy",
+                capital: "San Felipe",
+                region: "Centro-Occidental",
+                emoji: "🌿",
+                color: "#FEF08A",
+                cx: 306, cy: 168,
+                calloutOffset: { dx: -16, dy: -34 },
+                fact: "Destaca por su exuberante vegetación tropical, el Monumento Natural Cerro María Lionza y una gran riqueza de mitos y leyendas."
+            },
+            {
+                id: "zulia",
+                name: "Zulia",
+                capital: "Maracaibo",
+                region: "Zuliana",
+                emoji: "🌉",
+                color: "#C7D2FE",
+                cx: 102, cy: 175,
+                fact: "Hogar del Lago de Maracaibo (el más grande de Sudamérica), el Puente General Rafael Urdaneta y el fenómeno natural del Relámpago del Catatumbo."
+            }
+        ];
+
+        // Diccionario de nombres oficiales en GeoJSON / TopoJSON hacia nuestros IDs
+        const GEOJSON_NAME_MAP = {
+            "amazonas": "amazonas",
+            "anzoategui": "anzoategui",
+            "apure": "apure",
+            "aragua": "aragua",
+            "barinas": "barinas",
+            "bolivar": "bolivar",
+            "carabobo": "carabobo",
+            "cojedes": "cojedes",
+            "deltaamacuro": "deltaamacuro",
+            "distritocapital": "distritocapital",
+            "distritofederal": "distritocapital",
+            "falcon": "falcon",
+            "guarico": "guarico",
+            "laguaira": "laguaira",
+            "vargas": "laguaira",
+            "lara": "lara",
+            "merida": "merida",
+            "miranda": "miranda",
+            "monagas": "monagas",
+            "nuevaesparta": "nuevaesparta",
+            "portuguesa": "portuguesa",
+            "sucre": "sucre",
+            "tachira": "tachira",
+            "trujillo": "trujillo",
+            "yaracuy": "yaracuy",
+            "zulia": "zulia"
+        };
+
+        // GeoJSON de la Guayana Esequiba (Zona en Reclamación) para proyección exacta con D3
+        const ESEQUIBO_GEOJSON = {
+            type: "Feature",
+            properties: { name: "Guayana Esequiba" },
+            geometry: {
+                type: "Polygon",
+                coordinates: [[
+                    [-60.00, 8.55], [-59.55, 8.15], [-58.85, 7.65], [-58.45, 7.00],
+                    [-58.40, 6.45], [-58.62, 6.10], [-58.55, 5.55], [-58.35, 5.05],
+                    [-58.65, 4.55], [-58.50, 4.10], [-58.25, 3.60], [-58.15, 2.95],
+                    [-58.22, 2.25], [-58.55, 1.65], [-59.05, 1.35], [-59.55, 1.75],
+                    [-59.85, 2.35], [-59.75, 3.05], [-59.65, 3.75], [-59.95, 4.35],
+                    [-60.65, 4.55], [-60.75, 5.18], [-61.12, 5.55], [-61.38, 6.05],
+                    [-61.15, 6.65], [-60.72, 7.15], [-60.45, 7.75], [-60.20, 8.25],
+                    [-60.00, 8.55]
+                ]]
+            }
+        };
+
+        // Respaldo vectorial offline por si no hay conexión a internet
+        const FALLBACK_SVG_PATHS = {
+            zulia: "M 138,56 L 160,62 L 168,78 L 145,88 L 122,98 L 116,118 L 126,136 L 142,135 L 154,132 L 166,144 L 178,162 L 188,186 L 182,212 L 166,232 L 146,242 L 126,256 L 106,262 L 90,278 L 78,266 L 72,246 L 68,226 L 42,232 L 34,224 L 46,204 L 62,168 L 82,134 L 106,102 Z",
+            falcon: "M 154,132 L 186,116 L 214,104 L 222,86 L 216,72 L 224,62 L 238,64 L 246,78 L 244,96 L 256,104 L 288,108 L 316,120 L 328,136 L 322,152 L 296,154 L 274,158 L 246,154 L 216,156 L 188,164 L 166,144 Z",
+            lara: "M 178,162 L 188,164 L 216,156 L 246,154 L 274,158 L 286,174 L 282,196 L 266,208 L 246,220 L 224,212 L 204,198 L 182,212 L 188,186 Z",
+            yaracuy: "M 274,158 L 296,154 L 322,152 L 328,166 L 316,184 L 296,192 L 282,196 L 286,174 Z",
+            trujillo: "M 166,232 L 182,212 L 204,198 L 224,212 L 226,234 L 204,252 L 182,246 Z",
+            merida: "M 126,256 L 146,242 L 166,232 L 182,246 L 204,252 L 194,268 L 172,276 L 168,298 L 144,312 L 128,296 L 118,274 Z",
+            tachira: "M 90,278 L 106,262 L 126,256 L 118,274 L 128,296 L 144,312 L 148,326 L 124,328 L 112,334 L 90,328 L 86,296 Z",
+            portuguesa: "M 224,212 L 246,220 L 266,208 L 288,214 L 304,236 L 308,266 L 292,294 L 276,278 L 254,264 L 226,258 L 204,252 L 226,234 Z",
+            barinas: "M 144,312 L 168,298 L 172,276 L 194,268 L 204,252 L 226,258 L 254,264 L 276,278 L 292,294 L 308,266 L 348,278 L 368,304 L 342,314 L 312,308 L 276,304 L 252,314 L 224,332 L 192,342 L 154,334 L 124,328 L 148,326 Z",
+            apure: "M 104,335 L 124,328 L 154,334 L 192,342 L 224,332 L 252,314 L 276,304 L 312,308 L 342,314 L 368,304 L 408,314 L 442,318 L 424,344 L 398,374 L 382,412 L 368,398 L 315,388 L 268,396 L 228,365 L 162,364 L 112,358 Z",
+            cojedes: "M 282,196 L 296,192 L 316,184 L 336,194 L 358,196 L 366,222 L 352,252 L 348,278 L 308,266 L 304,236 L 288,214 L 266,208 Z",
+            carabobo: "M 322,152 L 356,154 L 372,162 L 376,184 L 358,196 L 336,194 L 316,184 L 328,166 Z",
+            aragua: "M 356,154 L 394,152 L 398,168 L 406,182 L 424,186 L 426,214 L 406,226 L 398,204 L 376,196 L 358,196 L 376,184 L 372,162 Z",
+            laguaira: "M 394,152 L 452,148 L 456,158 L 422,160 L 398,162 Z",
+            distritocapital: "M 404,160 L 426,159 L 428,170 L 406,170 Z",
+            miranda: "M 426,159 L 456,158 L 488,164 L 496,174 L 484,194 L 456,196 L 424,186 L 406,182 L 406,170 L 428,170 Z",
+            guarico: "M 358,196 L 376,196 L 398,204 L 406,226 L 426,214 L 424,186 L 456,196 L 484,194 L 508,218 L 532,252 L 512,274 L 502,304 L 474,316 L 442,318 L 408,314 L 368,304 L 348,278 L 352,252 L 366,222 Z",
+            anzoategui: "M 496,174 L 548,172 L 574,186 L 586,218 L 614,244 L 648,274 L 614,292 L 582,306 L 552,308 L 524,326 L 488,312 L 502,304 L 512,274 L 532,252 L 508,218 L 484,194 Z",
+            sucre: "M 548,172 L 568,162 L 614,158 L 668,146 L 686,150 L 664,162 L 642,164 L 652,174 L 612,178 L 574,186 Z",
+            nuevaesparta: "M 554,136 L 568,131 L 574,136 L 584,129 L 596,136 L 591,146 L 576,143 L 564,148 L 552,144 Z M 574,153 L 582,151 L 584,155 L 576,156 Z M 562,152 L 566,151 L 566,154 L 562,154 Z",
+            monagas: "M 574,186 L 612,178 L 652,174 L 672,202 L 668,236 L 692,252 L 664,274 L 648,274 L 614,244 L 586,218 Z",
+            deltaamacuro: "M 672,202 L 696,194 L 728,214 L 768,242 L 796,266 L 818,266 L 806,294 L 784,312 L 752,312 L 726,322 L 694,302 L 664,274 L 692,252 L 668,236 Z",
+            bolivar: "M 398,374 L 424,344 L 442,318 L 474,316 L 502,304 L 524,326 L 552,308 L 582,306 L 614,292 L 648,274 L 664,274 L 694,302 L 726,322 L 752,312 L 784,312 L 788,334 L 766,356 L 742,374 L 748,402 L 732,425 L 758,448 L 762,482 L 728,518 L 682,522 L 664,562 L 635,545 L 605,546 L 575,522 L 538,512 L 534,478 L 506,456 L 494,424 L 464,412 L 434,424 L 404,412 L 382,412 Z",
+            amazonas: "M 382,412 L 404,412 L 434,424 L 464,412 L 494,424 L 506,456 L 534,478 L 538,512 L 534,538 L 545,595 L 602,616 L 605,642 L 542,658 L 512,695 L 478,708 L 428,676 L 408,614 L 382,586 L 355,546 L 344,504 L 358,468 L 356,435 Z"
+        };
+
+        // ==========================================
+        // 2. ESTADO DE LA APLICACIÓN Y ZOOM DEL MAPA
+        // ==========================================
+        let appState = {
+            mode: 'explore', // 'explore' | 'find' | 'capitals'
+            selectedRegion: 'all',
+            learnedIds: new Set(),
+            selectedStateId: null,
+            score: 0,
+            streak: 0,
+            soundEnabled: true,
+            zoom: 1,
+            panX: 0,
+            panY: 0,
+            findTarget: null,
+            findAttempts: 0,
+            capitalTarget: null,
+            capitalAnswered: false
+        };
+
+        // Funciones de Zoom y Pan para facilitar el clic en estados pequeños
+        function applyMapTransform() {
+            const svg = document.getElementById('venezuela-map');
+            if (!svg) return;
+            svg.style.transform = `translate(${appState.panX}px, ${appState.panY}px) scale(${appState.zoom})`;
+        }
+
+        function zoomMap(delta) {
+            playSound('click');
+            appState.zoom = Math.min(2.8, Math.max(1, +(appState.zoom + delta).toFixed(2)));
+            if (appState.zoom === 1) {
+                appState.panX = 0;
+                appState.panY = 0;
+            }
+            applyMapTransform();
+        }
+
+        function zoomCenterNorth() {
+            playSound('click');
+            const dc = VENEZUELA_STATES.find(s => s.id === 'distritocapital');
+            appState.zoom = 2.3;
+            appState.panX = dc ? Math.round((480 - dc.cx) * 0.95) : 45;
+            appState.panY = dc ? Math.round((360 - dc.cy) * 0.75) : 145;
+            applyMapTransform();
+        }
+
+        function resetMapZoom() {
+            playSound('click');
+            appState.zoom = 1;
+            appState.panX = 0;
+            appState.panY = 0;
+            applyMapTransform();
+        }
+
+        function setupPanInteraction() {
+            const viewport = document.getElementById('map-viewport');
+            let isDragging = false;
+            let startX = 0;
+            let startY = 0;
+
+            viewport.addEventListener('pointerdown', (e) => {
+                if (appState.zoom <= 1) return;
+                isDragging = true;
+                startX = e.clientX - appState.panX;
+                startY = e.clientY - appState.panY;
+            });
+
+            window.addEventListener('pointermove', (e) => {
+                if (!isDragging) return;
+                appState.panX = e.clientX - startX;
+                appState.panY = e.clientY - startY;
+                applyMapTransform();
+            });
+
+            window.addEventListener('pointerup', () => {
+                isDragging = false;
+            });
+        }
+
+        function updateMapVisuals() {
+            const labelsLayer = document.getElementById('labels-layer');
+            labelsLayer.innerHTML = '';
+
+            VENEZUELA_STATES.forEach(state => {
+                const el = document.getElementById(`state-${state.id}`);
+                if (!el) return;
+
+                const isLearned = appState.learnedIds.has(state.id);
+                const matchesRegion = appState.selectedRegion === 'all' || state.region === appState.selectedRegion;
+                const isSelected = appState.selectedStateId === state.id && appState.mode === 'explore';
+                const isCapitalTarget = appState.capitalTarget && appState.capitalTarget.id === state.id && appState.mode === 'capitals';
+
+                // Resetear clases dinámicas
+                el.classList.remove('state-highlighted');
+
+                // Opacidad según filtro de región
+                el.style.opacity = matchesRegion ? '1' : '0.28';
+
+                // Color de relleno según estado
+                if (isCapitalTarget) {
+                    el.classList.add('state-highlighted');
+                } else if (isLearned) {
+                    el.style.fill = state.color;
+                } else if (isSelected) {
+                    el.style.fill = '#BAE6FD';
+                } else {
+                    el.style.fill = matchesRegion ? '#F1F5F9' : '#E2E8F0';
+                }
+
+                // Borde si está seleccionado en modo explorar
+                if (isSelected) {
+                    el.style.stroke = '#0284C7';
+                    el.style.strokeWidth = '2.4';
+                } else {
+                    el.style.stroke = '#1E293B';
+                    el.style.strokeWidth = '0.95';
+                }
+
+                // Añadir etiqueta y líneas guía (callouts) para estados pequeños
+                if (isLearned && matchesRegion) {
+                    const hasCallout = Boolean(state.calloutOffset);
+                    const labelX = hasCallout ? state.cx + state.calloutOffset.dx : state.cx;
+                    const labelY = hasCallout ? state.cy + state.calloutOffset.dy : state.cy;
+
+                    if (hasCallout) {
+                        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                        line.setAttribute("x1", state.cx);
+                        line.setAttribute("y1", state.cy);
+                        line.setAttribute("x2", labelX);
+                        line.setAttribute("y2", labelY + 4);
+                        line.setAttribute("stroke", "#1E293B");
+                        line.setAttribute("stroke-width", "1");
+                        line.setAttribute("stroke-dasharray", "2.5 1.5");
+                        labelsLayer.appendChild(line);
+
+                        const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                        dot.setAttribute("cx", state.cx);
+                        dot.setAttribute("cy", state.cy);
+                        dot.setAttribute("r", "2.2");
+                        dot.setAttribute("fill", "#0F172A");
+                        labelsLayer.appendChild(dot);
+                    }
+
+                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    text.setAttribute("x", labelX);
+                    text.setAttribute("y", labelY);
+                    text.setAttribute("text-anchor", "middle");
+                    text.setAttribute("dominant-baseline", "middle");
+                    text.setAttribute("fill", "#0F172A");
+                    text.setAttribute("font-family", "Nunito, sans-serif");
+                    text.setAttribute("font-weight", "800");
+                    text.setAttribute("font-size", hasCallout ? "9.5" : "11.5");
+                    text.setAttribute("paint-order", "stroke");
+                    text.setAttribute("stroke", "rgba(255,255,255,0.92)");
+                    text.setAttribute("stroke-width", "3.2");
+                    text.textContent = state.name === "Distrito Capital" ? "Dto. Capital" : state.name;
+                    labelsLayer.appendChild(text);
+                }
+            });
+        }
+
+        // ==========================================
+        // 4. INICIALIZACIÓN Y RENDERIZADO CARTOGRÁFICO (GEOJSON / TOPOJSON + FALLBACK)
+        // ==========================================
+        function normalizeStateKey(rawName) {
+            if (!rawName) return "";
+            return rawName
+                .toString()
+                .toLowerCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-z]/g, "");
+        }
+
+        function extractFeatureCollection(rawJson) {
+            if (!rawJson) return null;
+            if (rawJson.type === "FeatureCollection" && Array.isArray(rawJson.features)) {
+                return rawJson;
+            }
+            if (rawJson.type === "Topology" && rawJson.objects && typeof topojson !== "undefined") {
+                const objKeys = Object.keys(rawJson.objects);
+                if (objKeys.length > 0) {
+                    return topojson.feature(rawJson, rawJson.objects[objKeys[0]]);
+                }
+            }
+            return null;
+        }
+
+        function renderContextLabels(projection) {
+            const contextLayer = document.getElementById('geo-context-labels');
+            contextLayer.innerHTML = '';
+
+            const addGeoText = (lon, lat, lines, fontSize = 13, italic = true, color = "#1E3A8A", opacity = 0.72) => {
+                const pt = projection([lon, lat]);
+                if (!pt || isNaN(pt[0]) || isNaN(pt[1])) return;
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("x", Math.round(pt[0]));
+                text.setAttribute("y", Math.round(pt[1]));
+                text.setAttribute("text-anchor", "middle");
+                text.setAttribute("fill", color);
+                text.setAttribute("fill-opacity", opacity);
+                text.setAttribute("font-family", "Fredoka, Nunito, sans-serif");
+                text.setAttribute("font-size", fontSize);
+                text.setAttribute("font-weight", "600");
+                if (italic) text.setAttribute("font-style", "italic");
+
+                lines.forEach((lineStr, idx) => {
+                    const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+                    tspan.setAttribute("x", Math.round(pt[0]));
+                    tspan.setAttribute("dy", idx === 0 ? "0" : fontSize + 3);
+                    tspan.textContent = lineStr;
+                    text.appendChild(tspan);
+                });
+                contextLayer.appendChild(text);
+            };
+
+            addGeoText(-65.8, 12.15, ["MAR CARIBE"], 14, true, "#0369A1", 0.8);
+            addGeoText(-59.5, 10.65, ["OCÉANO", "ATLÁNTICO"], 12, true, "#0369A1", 0.75);
+            addGeoText(-71.2, 4.4, ["COLOMBIA"], 14, false, "#334155", 0.75);
+            addGeoText(-62.2, 1.35, ["BRASIL"], 14, false, "#334155", 0.75);
+            addGeoText(-58.2, 5.1, ["GUYANA"], 13, false, "#334155", 0.75);
+            addGeoText(-59.55, 5.85, ["Zona en", "Reclamación"], 11.5, false, "#1E293B", 0.88);
+        }
+
+        function renderFallbackVectorMap() {
+            const statesLayer = document.getElementById('states-layer');
+            const neighborLayer = document.getElementById('neighbor-lands');
+            const depsLayer = document.getElementById('federal-dependencies');
+            const hydroLayer = document.getElementById('hydrography-layer');
+            const contextLayer = document.getElementById('geo-context-labels');
+
+            statesLayer.innerHTML = '';
+            neighborLayer.innerHTML = `
+                <path d="M 0,112 L 26,118 L 54,106 L 88,88 L 116,66 L 138,54 L 158,60 L 166,76 L 152,86 L 122,94 L 106,108 L 82,138 L 56,192 L 42,228 L 34,234 L 46,232 L 60,224 L 68,248 L 78,272 L 90,282 L 86,312 L 90,328 L 104,335 L 112,358 L 162,364 L 228,365 L 268,396 L 315,388 L 368,398 L 382,412 L 356,435 L 358,468 L 344,504 L 355,546 L 382,586 L 352,586 L 330,564 L 268,564 L 265,586 L 0,586 Z" />
+                <path d="M 265,586 L 268,564 L 330,564 L 352,586 L 382,586 L 408,614 L 428,676 L 478,708 L 512,695 L 542,658 L 605,642 L 602,616 L 545,595 L 534,538 L 538,512 L 575,522 L 605,546 L 635,545 L 664,562 L 682,522 L 728,518 L 762,482 L 758,448 L 732,425 L 748,402 L 784,412 L 806,462 L 832,522 L 856,574 L 844,615 L 872,668 L 912,704 L 912,720 L 265,720 Z" />
+                <path d="M 838,274 L 878,312 L 924,352 L 960,368 L 960,720 L 912,720 L 912,704 L 872,668 L 844,615 L 856,574 L 832,522 L 806,462 L 784,412 L 796,382 L 818,342 Z" />
+                <path d="M 684,184 L 734,174 L 742,146 L 730,136 L 716,144 L 716,166 L 692,174 Z" />
+            `;
+            depsLayer.innerHTML = `
+                <circle cx="364" cy="74" r="3.2" /><circle cx="378" cy="76" r="3" />
+                <ellipse cx="420" cy="84" rx="7" ry="4" /><ellipse cx="452" cy="88" rx="6.5" ry="2.8" />
+                <ellipse cx="500" cy="136" rx="9" ry="3.8" /><circle cx="540" cy="85" r="3.5" />
+            `;
+            hydroLayer.innerHTML = `
+                <path d="M 142,135 C 156,133 168,148 170,174 C 172,202 158,224 139,225 C 118,226 108,205 112,178 C 115,156 128,138 142,135 Z" fill="#9BD7EC" stroke="#1E293B" stroke-width="0.85" />
+            `;
+            document.getElementById('state-esequibo').setAttribute("d",
+                "M 818,266 L 838,274 L 818,342 L 796,382 L 784,412 L 806,462 L 832,522 L 856,574 L 844,615 L 872,668 L 912,704 L 876,684 L 842,658 L 818,622 L 812,578 L 798,538 L 774,518 L 792,492 L 762,482 L 758,448 L 732,425 L 748,402 L 742,374 L 766,356 L 788,334 L 784,312 L 806,294 Z"
+            );
+            contextLayer.innerHTML = `
+                <text x="480" y="34" text-anchor="middle" fill="#0369A1" font-family="Fredoka, sans-serif" font-size="14" font-style="italic">MAR CARIBE</text>
+                <text x="235" y="495" text-anchor="middle" fill="#334155" font-family="Fredoka, sans-serif" font-size="14" font-weight="600">COLOMBIA</text>
+                <text x="695" y="665" text-anchor="middle" fill="#334155" font-family="Fredoka, sans-serif" font-size="14" font-weight="600">BRASIL</text>
+                <text x="905" y="465" text-anchor="middle" fill="#334155" font-family="Fredoka, sans-serif" font-size="13" font-weight="600">GUYANA</text>
+                <text x="815" y="438" text-anchor="middle" fill="#1E293B" font-family="Fredoka, sans-serif" font-size="11" font-weight="600">Zona en</text>
+                <text x="815" y="452" text-anchor="middle" fill="#1E293B" font-family="Fredoka, sans-serif" font-size="11" font-weight="600">Reclamación</text>
+            `;
+
+            VENEZUELA_STATES.forEach(state => {
+                const d = FALLBACK_SVG_PATHS[state.id];
+                if (!d) return;
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                path.setAttribute("id", `state-${state.id}`);
+                path.setAttribute("data-id", state.id);
+                path.setAttribute("class", "state-path");
+                path.setAttribute("d", d);
+                statesLayer.appendChild(path);
+            });
+
+            document.getElementById('map-source-text').textContent = 'Mapa Político-Territorial';
+        }
+
+        async function fetchWithTimeout(url, ms = 4500) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), ms);
+            try {
+                const response = await fetch(url, { signal: controller.signal });
+                clearTimeout(timer);
+                if (!response.ok) return null;
+                return await response.json();
+            } catch (e) {
+                clearTimeout(timer);
+                return null;
+            }
+        }
+
+        async function buildCartographicMap() {
+            const cartoSources = [
+                "https://cdn.jsdelivr.net/gh/apache/superset@master/superset-frontend/plugins/plugin-chart-country-map/src/countries/venezuela.geojson",
+                "https://cdn.jsdelivr.net/npm/@highcharts/map-collection@2.1.0/countries/ve/ve-all.topo.json",
+                "https://cdn.jsdelivr.net/gh/codeforamerica/click_that_hood@master/public/data/venezuela.geojson"
+            ];
+
+            let loadedCartography = false;
+
+            if (typeof d3 !== 'undefined') {
+                // Cargar en paralelo límites mundiales para dibujar Colombia, Brasil, Guyana y Trinidad a escala exacta
+                const worldPromise = fetchWithTimeout("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json", 4000);
+
+                for (const url of cartoSources) {
+                    const rawData = await fetchWithTimeout(url, 4500);
+                    const featureCollection = extractFeatureCollection(rawData);
+
+                    if (featureCollection && Array.isArray(featureCollection.features) && featureCollection.features.length >= 23) {
+                        const statesLayer = document.getElementById('states-layer');
+                        const depsLayer = document.getElementById('federal-dependencies');
+                        const neighborLayer = document.getElementById('neighbor-lands');
+                        statesLayer.innerHTML = '';
+                        depsLayer.innerHTML = '';
+                        neighborLayer.innerHTML = '';
+
+                        // Filtrar las 24 entidades principales para calcular un encuadre óptimo
+                        const mainFeatures = [];
+                        const depFeatures = [];
+
+                        featureCollection.features.forEach(feature => {
+                            const props = feature.properties || {};
+                            const rawName = props.NAME_1 || props.name || props.NAME || props.ESTADO || props.estado || props.title || "";
+                            const key = normalizeStateKey(rawName);
+                            if (key.includes("dependencias")) {
+                                depFeatures.push(feature);
+                            } else if (GEOJSON_NAME_MAP[key]) {
+                                mainFeatures.push({ feature, stateId: GEOJSON_NAME_MAP[key] });
+                            }
+                        });
+
+                        if (mainFeatures.length >= 23) {
+                            const fitCollection = {
+                                type: "FeatureCollection",
+                                features: mainFeatures.map(item => item.feature)
+                            };
+
+                            // Proyección Mercator ajustada para dejar espacio cómodo al Mar Caribe arriba y Guayana Esequiba a la derecha
+                            const projection = d3.geoMercator().fitExtent(
+                                [[52, 68], [805, 704]],
+                                fitCollection
+                            );
+                            const pathGenerator = d3.geoPath().projection(projection);
+
+                            // 1. Dibujar países vecinos (Colombia 170, Brasil 076, Guyana 328, Trinidad y Tobago 780, Aruba 533, Curazao 531)
+                            const worldTopo = await worldPromise;
+                            if (worldTopo && worldTopo.objects && worldTopo.objects.countries && typeof topojson !== 'undefined') {
+                                const worldGeo = topojson.feature(worldTopo, worldTopo.objects.countries);
+                                const neighborIds = new Set(["170", "076", "328", "780", "533", "531", "308"]);
+                                worldGeo.features.forEach(country => {
+                                    if (neighborIds.has(String(country.id).padStart(3, '0'))) {
+                                        const cd = pathGenerator(country);
+                                        if (cd) {
+                                            const cPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                                            cPath.setAttribute("d", cd);
+                                            neighborLayer.appendChild(cPath);
+                                        }
+                                    }
+                                });
+                            }
+
+                            // 2. Dibujar Guayana Esequiba (Zona en Reclamación) proyectada con exactitud
+                            const esequiboD = pathGenerator(ESEQUIBO_GEOJSON);
+                            if (esequiboD) {
+                                document.getElementById('state-esequibo').setAttribute("d", esequiboD);
+                            }
+
+                            // 3. Dibujar Dependencias Federales reales (Los Roques, Las Aves, La Orchila, La Tortuga, etc.)
+                            depFeatures.forEach(dep => {
+                                const dd = pathGenerator(dep);
+                                if (dd) {
+                                    const dPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                                    dPath.setAttribute("d", dd);
+                                    depsLayer.appendChild(dPath);
+                                }
+                            });
+
+                            // 4. Dibujar los 23 estados y el Distrito Capital con sus costas y fronteras reales
+                            mainFeatures.forEach(({ feature, stateId }) => {
+                                const stateObj = VENEZUELA_STATES.find(s => s.id === stateId);
+                                if (!stateObj) return;
+
+                                const d = pathGenerator(feature);
+                                if (!d) return;
+
+                                const centroid = pathGenerator.centroid(feature);
+                                if (Array.isArray(centroid) && !isNaN(centroid[0]) && !isNaN(centroid[1])) {
+                                    stateObj.cx = Math.round(centroid[0]);
+                                    stateObj.cy = Math.round(centroid[1]);
+                                }
+
+                                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                                path.setAttribute("id", `state-${stateObj.id}`);
+                                path.setAttribute("data-id", stateObj.id);
+                                path.setAttribute("class", "state-path");
+                                path.setAttribute("d", d);
+                                statesLayer.appendChild(path);
+                            });
+
+                            // 5. Etiquetas geográficas de contexto proyectadas
+                            renderContextLabels(projection);
+
+                            loadedCartography = true;
+                            document.getElementById('map-source-text').textContent = 'Cartografía Oficial de Venezuela';
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!loadedCartography) {
+                renderFallbackVectorMap();
+            }
+        }
+
+        async function initApp() {
+            loadProgress();
+            await buildCartographicMap();
+            setupMapInteractions();
+            setupPanInteraction();
+            renderStatesList();
+            updateMapVisuals();
+            updateStatsUI();
+        }
+
+        function markStateAsLearned(stateId, pointsEarned = 15) {
+            const wasNew = !appState.learnedIds.has(stateId);
+            appState.learnedIds.add(stateId);
+
+            if (wasNew) {
+                appState.score += pointsEarned;
+                const el = document.getElementById(`state-${stateId}`);
+                if (el) {
+                    el.classList.remove('state-just-learned');
+                    void el.offsetWidth; // trigger reflow
+                    el.classList.add('state-just-learned');
+                }
+            } else {
+                appState.score += 5; // Puntos extra por repaso
+            }
+
+            saveProgress();
+            updateStatsUI();
+
+            // Comprobar si completó los 24 estados
+            if (wasNew && appState.learnedIds.size === VENEZUELA_STATES.length) {
+                triggerVictoryCelebration();
+            } else {
+                playSound('success');
+            }
+        }
+
+        // ==========================================
+        // 3. SONIDOS SINTETIZADOS (WEB AUDIO API) Y PERSISTENCIA
+        // ==========================================
+        let audioCtx = null;
+
+        function playSound(type) {
+            if (!appState.soundEnabled) return;
+            try {
+                if (!audioCtx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    audioCtx = new AudioContext();
+                }
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                const now = audioCtx.currentTime;
+
+                if (type === 'click') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(520, now);
+                    osc.frequency.exponentialRampToValueAtTime(680, now + 0.06);
+                    gain.gain.setValueAtTime(0.08, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+                    osc.start(now);
+                    osc.stop(now + 0.07);
+                } else if (type === 'success') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(523.25, now); // Do5
+                    osc.frequency.setValueAtTime(659.25, now + 0.08); // Mi5
+                    osc.frequency.setValueAtTime(783.99, now + 0.16); // Sol5
+                    gain.gain.setValueAtTime(0.14, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+                    osc.start(now);
+                    osc.stop(now + 0.32);
+                } else if (type === 'error') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(220, now);
+                    osc.frequency.linearRampToValueAtTime(170, now + 0.2);
+                    gain.gain.setValueAtTime(0.09, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+                    osc.start(now);
+                    osc.stop(now + 0.22);
+                } else if (type === 'fanfare') {
+                    const notes = [523.25, 659.25, 783.99, 1046.5];
+                    notes.forEach((freq, i) => {
+                        const o = audioCtx.createOscillator();
+                        const g = audioCtx.createGain();
+                        o.type = 'triangle';
+                        o.connect(g);
+                        g.connect(audioCtx.destination);
+                        o.frequency.setValueAtTime(freq, now + i * 0.11);
+                        g.gain.setValueAtTime(0.15, now + i * 0.11);
+                        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.11 + 0.35);
+                        o.start(now + i * 0.11);
+                        o.stop(now + i * 0.11 + 0.35);
+                    });
+                }
+            } catch (e) {
+                // Ignorar si el navegador bloquea el audio
+            }
+        }
+
+        function toggleSound() {
+            appState.soundEnabled = !appState.soundEnabled;
+            document.getElementById('sound-icon').textContent = appState.soundEnabled ? '🔊' : '🔇';
+            if (appState.soundEnabled) playSound('click');
+        }
+
+        function saveProgress() {
+            try {
+                const payload = {
+                    learnedIds: Array.from(appState.learnedIds),
+                    score: appState.score,
+                    streak: appState.streak
+                };
+                localStorage.setItem('vzla_states_progress_v1', JSON.stringify(payload));
+            } catch (e) {}
+        }
+
+        function loadProgress() {
+            try {
+                const raw = localStorage.getItem('vzla_states_progress_v1');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (Array.isArray(parsed.learnedIds)) {
+                        appState.learnedIds = new Set(parsed.learnedIds);
+                    }
+                    appState.score = parsed.score || 0;
+                    appState.streak = parsed.streak || 0;
+                }
+            } catch (e) {}
+        }
+
+        // ==========================================
+        // 5. INTERACCIONES DEL MAPA, MODOS Y FILTROS
+        // ==========================================
+        function setupMapInteractions() {
+            const tooltip = document.getElementById('map-tooltip');
+            const tooltipName = document.getElementById('tooltip-name');
+            const tooltipSub = document.getElementById('tooltip-sub');
+
+            VENEZUELA_STATES.forEach(state => {
+                const el = document.getElementById(`state-${state.id}`);
+                if (!el) return;
+
+                el.addEventListener('mouseenter', () => {
+                    tooltipName.textContent = `${state.emoji} ${state.name}`;
+                    tooltipSub.textContent = appState.mode === 'capitals'
+                        ? `Región ${state.region}`
+                        : `Capital: ${state.capital}`;
+                    tooltip.classList.remove('hidden');
+                });
+
+                el.addEventListener('mousemove', (e) => {
+                    tooltip.style.left = `${e.clientX + 14}px`;
+                    tooltip.style.top = `${e.clientY + 14}px`;
+                });
+
+                el.addEventListener('mouseleave', () => {
+                    tooltip.classList.add('hidden');
+                });
+
+                el.addEventListener('click', () => {
+                    handleStateClick(state);
+                });
+            });
+        }
+
+        function handleStateClick(state) {
+            if (appState.mode === 'explore') {
+                playSound('click');
+                selectStateInExplore(state.id);
+            } else if (appState.mode === 'find') {
+                checkFindAnswer(state);
+            } else if (appState.mode === 'capitals') {
+                playSound('click');
+                nextCapitalQuestion(state);
+            }
+        }
+
+        function setMode(newMode) {
+            playSound('click');
+            appState.mode = newMode;
+
+            // Actualizar estilos de pestañas
+            const modes = ['explore', 'find', 'capitals'];
+            modes.forEach(m => {
+                const tab = document.getElementById(`tab-${m}`);
+                const panel = document.getElementById(`panel-${m}`);
+                if (m === newMode) {
+                    tab.className = "mode-tab btn-3d py-2.5 px-3 sm:px-5 rounded-2xl font-display font-semibold text-sm sm:text-base flex items-center justify-center gap-2 bg-sky-500 text-white";
+                    panel.classList.remove('hidden');
+                    panel.classList.add('flex');
+                } else {
+                    tab.className = "mode-tab py-2.5 px-3 sm:px-5 rounded-2xl font-display font-semibold text-sm sm:text-base flex items-center justify-center gap-2 text-slate-600 hover:bg-slate-100 transition";
+                    panel.classList.add('hidden');
+                    panel.classList.remove('flex');
+                }
+            });
+
+            const badge = document.getElementById('map-instruction-badge');
+            if (newMode === 'explore') {
+                badge.textContent = '👆 Haz clic en cualquier estado para descubrirlo';
+                badge.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-sky-100 text-sky-700';
+            } else if (newMode === 'find') {
+                badge.textContent = '🎯 Busca y haz clic en el estado indicado a la derecha';
+                badge.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800';
+                document.getElementById('find-learned-preview').classList.add('hidden');
+                nextFindQuestion(false);
+            } else if (newMode === 'capitals') {
+                badge.textContent = '🏛️ Adivina la capital del estado iluminado en amarillo';
+                badge.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-purple-100 text-purple-800';
+                nextCapitalQuestion();
+            }
+
+            updateMapVisuals();
+        }
+
+        function getFilteredPool() {
+            if (appState.selectedRegion === 'all') return VENEZUELA_STATES;
+            return VENEZUELA_STATES.filter(s => s.region === appState.selectedRegion);
+        }
+
+        function filterByRegion(regionValue) {
+            playSound('click');
+            appState.selectedRegion = regionValue;
+            renderStatesList();
+            updateMapVisuals();
+
+            if (appState.mode === 'find') nextFindQuestion(false);
+            if (appState.mode === 'capitals') nextCapitalQuestion();
+        }
+
+        function renderStatesList() {
+            const grid = document.getElementById('states-grid');
+            const pool = getFilteredPool();
+            document.getElementById('list-count').textContent = pool.length;
+            grid.innerHTML = '';
+
+            pool.forEach(state => {
+                const isLearned = appState.learnedIds.has(state.id);
+                const isSelected = appState.selectedStateId === state.id;
+
+                const btn = document.createElement('button');
+                btn.className = `text-left px-3 py-2 rounded-2xl border-2 text-xs font-bold transition flex items-center justify-between gap-1.5 ${
+                    isSelected
+                        ? 'bg-sky-100 border-sky-400 text-sky-900 shadow-xs'
+                        : isLearned
+                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900 hover:bg-emerald-100/70'
+                            : 'bg-slate-50 border-slate-200/80 text-slate-700 hover:bg-slate-100'
+                }`;
+                btn.innerHTML = `
+                    <span class="truncate">${state.emoji} ${state.name}</span>
+                    <span>${isLearned ? '✅' : '⚪'}</span>
+                `;
+                btn.onclick = () => {
+                    playSound('click');
+                    selectStateInExplore(state.id);
+                };
+                grid.appendChild(btn);
+            });
+        }
+
+        function updateMarkLearnedButton() {
+            const btn = document.getElementById('btn-mark-learned');
+            const text = document.getElementById('btn-mark-text');
+            if (!appState.selectedStateId) return;
+
+            const isLearned = appState.learnedIds.has(appState.selectedStateId);
+            if (isLearned) {
+                btn.className = "btn-3d w-full py-3 px-4 rounded-2xl font-display font-bold text-base flex items-center justify-center gap-2 bg-slate-200 hover:bg-slate-300 text-slate-700";
+                text.textContent = "Aprendido ✓ (Clic para desmarcar)";
+            } else {
+                btn.className = "btn-3d w-full py-3 px-4 rounded-2xl font-display font-bold text-base flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white";
+                text.textContent = "Marcar como aprendido (+10 pts)";
+            }
+        }
+
+        function toggleCurrentStateLearned() {
+            if (!appState.selectedStateId) return;
+            if (appState.learnedIds.has(appState.selectedStateId)) {
+                playSound('click');
+                appState.learnedIds.delete(appState.selectedStateId);
+                saveProgress();
+                updateStatsUI();
+            } else {
+                markStateAsLearned(appState.selectedStateId, 10);
+            }
+            updateMarkLearnedButton();
+            updateMapVisuals();
+            renderStatesList();
+        }
+
+        // --- MODO EXPLORAR ---
+        function selectEsequibo() {
+            if (appState.mode !== 'explore') return;
+            playSound('click');
+            appState.selectedStateId = null;
+
+            document.getElementById('card-content-body').classList.add('hidden');
+            document.getElementById('card-state-info').classList.remove('hidden');
+            document.getElementById('card-capital-box').classList.add('hidden');
+            document.getElementById('btn-mark-learned').classList.add('hidden');
+
+            document.getElementById('card-region-badge').textContent = 'Territorio en Reclamación';
+            document.getElementById('card-state-name').textContent = 'Guayana Esequiba';
+            document.getElementById('card-emoji').textContent = '📜';
+            document.getElementById('card-fun-fact').textContent =
+                'Territorio ubicado al oeste del río Esequibo reclamado históricamente por Venezuela, sujeto al Acuerdo de Ginebra firmado el 17 de febrero de 1966.';
+
+            updateMapVisuals();
+            renderStatesList();
+        }
+
+        function selectStateInExplore(stateId) {
+            appState.selectedStateId = stateId;
+            const state = VENEZUELA_STATES.find(s => s.id === stateId);
+            if (!state) return;
+
+            document.getElementById('card-content-body').classList.add('hidden');
+            document.getElementById('card-state-info').classList.remove('hidden');
+            document.getElementById('card-capital-box').classList.remove('hidden');
+            document.getElementById('btn-mark-learned').classList.remove('hidden');
+
+            document.getElementById('card-region-badge').textContent = `Región ${state.region}`;
+            document.getElementById('card-state-name').textContent = state.name;
+            document.getElementById('card-emoji').textContent = state.emoji;
+            document.getElementById('card-capital-name').textContent = state.capital;
+            document.getElementById('card-fun-fact').textContent = state.fact;
+
+            updateMarkLearnedButton();
+            updateMapVisuals();
+            renderStatesList();
+        }
+
+        function nextFindQuestion(skipped = false) {
+            if (skipped) playSound('click');
+            const pool = getFilteredPool();
+            // Priorizar estados aún no aprendidos dentro de la región filtrada
+            const unlearned = pool.filter(s => !appState.learnedIds.has(s.id));
+            const candidates = unlearned.length > 0 ? unlearned : pool;
+
+            // Evitar repetir exactamente el mismo estado si hay más opciones
+            let next = candidates[Math.floor(Math.random() * candidates.length)];
+            if (candidates.length > 1 && appState.findTarget && next.id === appState.findTarget.id) {
+                next = candidates.find(c => c.id !== appState.findTarget.id) || next;
+            }
+
+            appState.findTarget = next;
+            appState.findAttempts = 0;
+
+            document.getElementById('find-target-name').textContent = `${next.emoji} ${next.name}`;
+            document.getElementById('find-remaining').textContent = unlearned.length > 0
+                ? `Faltan ${unlearned.length} por pintar`
+                : `¡Región completada! Modo repaso`;
+
+            document.getElementById('find-hint-box').classList.add('hidden');
+            document.getElementById('find-feedback').classList.add('hidden');
+        }
+
+        function showFindHint() {
+            if (!appState.findTarget) return;
+            playSound('click');
+            const t = appState.findTarget;
+            document.getElementById('find-hint-text').textContent =
+                `Pertenece a la Región ${t.region} y su capital es ${t.capital}.`;
+            document.getElementById('find-hint-box').classList.remove('hidden');
+        }
+
+        function checkFindAnswer(clickedState) {
+            if (!appState.findTarget) return;
+            const feedback = document.getElementById('find-feedback');
+            const card = document.getElementById('quiz-find-card');
+
+            if (clickedState.id === appState.findTarget.id) {
+                // ¡ACIERTO!
+                appState.streak++;
+                const bonus = Math.max(5, 20 - appState.findAttempts * 5);
+                markStateAsLearned(clickedState.id, bonus);
+                updateMapVisuals();
+                renderStatesList();
+
+                feedback.className = "rounded-2xl p-3.5 mb-4 text-sm font-bold flex items-center gap-2.5 bg-emerald-100 text-emerald-800 border border-emerald-300";
+                feedback.innerHTML = `<span>🎉</span> <span>¡Correcto! Ese es <strong>${clickedState.name}</strong> (+${bonus} pts)</span>`;
+                feedback.classList.remove('hidden');
+
+                // Mostrar mini tarjeta educativa
+                const preview = document.getElementById('find-learned-preview');
+                document.getElementById('preview-title').textContent = `${clickedState.emoji} ${clickedState.name} — Capital: ${clickedState.capital}`;
+                document.getElementById('preview-desc').textContent = clickedState.fact;
+                preview.classList.remove('hidden');
+
+                setTimeout(() => {
+                    if (appState.mode === 'find') nextFindQuestion(false);
+                }, 1500);
+            } else {
+                // ERROR AMIGABLE
+                playSound('error');
+                appState.streak = 0;
+                appState.findAttempts++;
+                updateStatsUI();
+
+                card.classList.remove('shake-error');
+                void card.offsetWidth;
+                card.classList.add('shake-error');
+
+                feedback.className = "rounded-2xl p-3.5 mb-4 text-sm font-bold flex items-center gap-2.5 bg-rose-100 text-rose-800 border border-rose-300";
+                feedback.innerHTML = `<span>🤔</span> <span>Ese es <strong>${clickedState.name}</strong>. ¡Inténtalo de nuevo! Busca <strong>${appState.findTarget.name}</strong>.</span>`;
+                feedback.classList.remove('hidden');
+
+                if (appState.findAttempts >= 2) {
+                    showFindHint();
+                }
+            }
+        }
+
+        // --- MODO QUIZ: CAPITALES ---
+        function nextCapitalQuestion(forcedState = null) {
+            const pool = getFilteredPool();
+            const unlearned = pool.filter(s => !appState.learnedIds.has(s.id));
+            const candidates = unlearned.length > 0 ? unlearned : pool;
+
+            let target = forcedState;
+            if (!target) {
+                target = candidates[Math.floor(Math.random() * candidates.length)];
+                if (candidates.length > 1 && appState.capitalTarget && target.id === appState.capitalTarget.id) {
+                    target = candidates.find(c => c.id !== appState.capitalTarget.id) || target;
+                }
+            }
+
+            appState.capitalTarget = target;
+            appState.capitalAnswered = false;
+
+            document.getElementById('capital-target-state').textContent = `${target.emoji} ${target.name}`;
+            document.getElementById('capital-feedback').classList.add('hidden');
+
+            // Generar 3 distractores aleatorios
+            const otherCapitals = VENEZUELA_STATES
+                .filter(s => s.id !== target.id)
+                .map(s => s.capital)
+                .sort(() => Math.random() - 0.5)
+                .slice(0, 3);
+
+            const options = [target.capital, ...otherCapitals].sort(() => Math.random() - 0.5);
+
+            const optionsContainer = document.getElementById('capital-options');
+            optionsContainer.innerHTML = '';
+
+            options.forEach(cap => {
+                const btn = document.createElement('button');
+                btn.className = "btn-3d w-full text-left py-3 px-4 rounded-2xl bg-slate-50 hover:bg-purple-50 border-2 border-slate-200 hover:border-purple-300 font-display font-semibold text-base text-slate-700 transition flex items-center justify-between";
+                btn.innerHTML = `<span>🏛️ ${cap}</span>`;
+                btn.onclick = () => checkCapitalAnswer(cap, btn);
+                optionsContainer.appendChild(btn);
+            });
+
+            updateMapVisuals();
+        }
+
+        function checkCapitalAnswer(selectedCapital, btnElement) {
+            if (appState.capitalAnswered) return;
+            const target = appState.capitalTarget;
+            const feedback = document.getElementById('capital-feedback');
+
+            if (selectedCapital === target.capital) {
+                appState.capitalAnswered = true;
+                appState.streak++;
+                markStateAsLearned(target.id, 15);
+                renderStatesList();
+
+                btnElement.className = "btn-3d w-full text-left py-3 px-4 rounded-2xl bg-emerald-500 border-2 border-emerald-600 font-display font-bold text-base text-white flex items-center justify-between";
+                btnElement.innerHTML = `<span>🏛️ ${selectedCapital}</span> <span>✅</span>`;
+
+                feedback.className = "rounded-2xl p-3.5 text-sm font-bold flex items-center gap-2 bg-emerald-100 text-emerald-800 border border-emerald-300";
+                feedback.innerHTML = `<span>🌟</span> <span>¡Muy bien! La capital de <strong>${target.name}</strong> es <strong>${target.capital}</strong>.</span>`;
+                feedback.classList.remove('hidden');
+
+                setTimeout(() => {
+                    if (appState.mode === 'capitals') {
+                        nextCapitalQuestion();
+                    }
+                }, 1400);
+            } else {
+                playSound('error');
+                appState.streak = 0;
+                updateStatsUI();
+
+                btnElement.className = "w-full text-left py-3 px-4 rounded-2xl bg-rose-100 border-2 border-rose-300 font-display font-semibold text-base text-rose-800 flex items-center justify-between opacity-75 cursor-not-allowed";
+                btnElement.innerHTML = `<span>🏛️ ${selectedCapital}</span> <span>❌</span>`;
+                btnElement.disabled = true;
+
+                feedback.className = "rounded-2xl p-3.5 text-sm font-bold flex items-center gap-2 bg-rose-50 text-rose-700 border border-rose-200";
+                feedback.innerHTML = `<span>💡</span> <span>Esa no es la capital de ${target.name}. ¡Prueba con otra opción!</span>`;
+                feedback.classList.remove('hidden');
+            }
+        }
+
+        // ==========================================
+        // 6. ACTUALIZACIÓN DE ESTADÍSTICAS Y MODALES
+        // ==========================================
+        function updateStatsUI() {
+            const count = appState.learnedIds.size;
+            const total = VENEZUELA_STATES.length;
+            const pct = Math.round((count / total) * 100);
+
+            document.getElementById('progress-text').textContent = `${count} / ${total} Aprendidos`;
+            document.getElementById('progress-bar').style.width = `${pct}%`;
+            document.getElementById('score-display').textContent = appState.score;
+            document.getElementById('streak-display').textContent = appState.streak;
+        }
+
+        function triggerVictoryCelebration() {
+            playSound('fanfare');
+            document.getElementById('final-score').textContent = `${appState.score} ⭐`;
+            const modal = document.getElementById('victory-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            if (typeof confetti === 'function') {
+                confetti({
+                    particleCount: 120,
+                    spread: 80,
+                    origin: { y: 0.6 },
+                    colors: ['#FFD166', '#118AB2', '#EF476F', '#06D6A0']
+                });
+            }
+        }
+
+        function closeVictoryModal() {
+            playSound('click');
+            const modal = document.getElementById('victory-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function confirmReset() {
+            playSound('click');
+            const modal = document.getElementById('reset-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeResetModal() {
+            playSound('click');
+            const modal = document.getElementById('reset-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function resetProgress(closeModals = false) {
+            playSound('click');
+            appState.learnedIds.clear();
+            appState.score = 0;
+            appState.streak = 0;
+            appState.selectedStateId = null;
+            saveProgress();
+
+            if (closeModals) {
+                closeResetModal();
+                closeVictoryModal();
+            }
+
+            // Restablecer tarjeta de explorar
+            document.getElementById('card-content-body').classList.remove('hidden');
+            document.getElementById('card-state-info').classList.add('hidden');
+            document.getElementById('card-region-badge').textContent = 'Región';
+            document.getElementById('card-state-name').textContent = 'Selecciona un estado';
+            document.getElementById('card-emoji').textContent = '🗺️';
+
+            updateStatsUI();
+            updateMapVisuals();
+            renderStatesList();
+
+            if (appState.mode === 'find') nextFindQuestion(false);
+            if (appState.mode === 'capitals') nextCapitalQuestion();
+        }
+
+        // Arrancar la aplicación al cargar el DOM
+        window.addEventListener('DOMContentLoaded', initApp);
+    </script>
+</body>
+</html>
